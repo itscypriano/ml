@@ -1,0 +1,36 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 40px;
+    background: #f9f9f9;
+    color: #333;
+}
+h1 {
+    color: #222;
+}
+.output {
+    background: white;
+    border: 1px solid #ccc;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 10px;
+}
+.section {
+    margin-bottom: 20px;
+}
+.section-background {
+    background: #f9f9f9;
+    border: 1px solid #ccc;
+    padding: 20px;
+    margin-top: 20px;
+    border-radius: 10px;
+}
+.code {
+    font-family: monospace;
+    background: #eee;
+    padding: 5px;
+    display: inline-block;
+    border-radius: 4px;
+}
+mark {
+    background: #ffd54f;
+}

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Efeito de Cohen - Bitcoin vs M2 com Ensemble</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.12.0/dist/tf.min.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 1000px;
+      margin: auto;
+      padding: 20px;
+      text-align: center;
+    }
+    canvas {
+      width: 100% !important;
+      height: 500px !important;
+      margin: 30px 0;
+    }
+    h2 {
+      margin-top: 40px;
+    }
+    p {
+      text-align: justify;
+      line-height: 1.6;
+    }
+    #resultado, #cohen {
+      font-weight: bold;
+      margin-top: 30px;
+    }
+  </style>
+</head>
+<body>
+  <h1>Estatística de Efeito de Cohen com Ensemble</h1>
+
+  <h2>📘 Introdução</h2>
+  <p>
+    Este projeto utiliza o <strong>efeito de Cohen</strong>, uma medida estatística que indica a magnitude da diferença entre dois grupos (neste caso, crescimento do M2 e retornos do Bitcoin),
+    combinada com uma técnica de aprendizado de máquina chamada <strong>Ensemble</strong>. O ensemble utiliza múltiplos modelos (neste caso redes neurais) para obter previsões mais robustas e confiáveis.
+  </p>
+
+  <div id="resultado">Carregando dados e modelos...</div>
+  <div id="cohen"></div>
+
+  <canvas id="linhaChart"></canvas>
+  <canvas id="ensembleChart"></canvas>
+
+  <h2>🧮 Explicações dos Cálculos</h2>
+
+  <p><strong>Retorno do Bitcoin:</strong> Calculado com a fórmula <code>(preço_mês_atual - preço_mês_anterior) / preço_mês_anterior</code>. Isso nos dá a variação percentual mensal do preço do Bitcoin.</p>
+
+  <p><strong>Crescimento do M2:</strong> Utiliza a mesma fórmula aplicada sobre o agregado monetário M2, que representa a quantidade de moeda na economia. O crescimento do M2 pode indicar políticas monetárias expansionistas.</p>
+
+  <p><strong>Ensemble de Redes Neurais:</strong> Um conjunto de 7 redes neurais simples foi treinado com os dados reais do crescimento do M2 como entrada, e o retorno do Bitcoin (positivo ou não) como saída. A previsão final é feita com base na média das saídas desses modelos, o que ajuda a reduzir viés e variância.</p>
+
+  <p><strong>Efeito de Cohen (Cohen's d):</strong> Uma medida estatística que indica o quão grande é a diferença entre dois grupos — neste caso, entre os retornos do Bitcoin e o crescimento do M2. O valor obtido foi interpretado como <span id="interpretacaoCohen"></span>.</p>
+
+  <script>
+    // Atualiza a interpretação textual do efeito de Cohen dinamicamente (para evitar redundância)
+    document.addEventListener("DOMContentLoaded", () => {
+      const cohenTexto = document.getElementById("cohen").innerText;
+      const interpretacao = cohenTexto.substring(cohenTexto.indexOf('(') + 1, cohenTexto.length - 1);
+      document.getElementById("interpretacaoCohen").innerText = interpretacao;
+    });
+  </script>
+
+  <script>
+    // Função para buscar dados reais de Bitcoin (preço diário para últimos 365 dias)
+    async function fetchBitcoinData() {
+      const response = await fetch('https://api.coingecko.com/api/v3/coins/bitcoin/market_chart?vs_currency=usd&days=365');
+      const data = await response.json();
+      const prices = data.prices;
+      const monthly = {};
+      for (let [timestamp, price] of prices) {
+        const date = new Date(timestamp);
+        const key = `${date.getFullYear()}-${date.getMonth() + 1}`;
+        // Vamos guardar o último preço do mês (substitui conforme avança no mesmo mês)
+        monthly[key] = price;
+      }
+      return Object.entries(monthly).map(([key, value]) => {
+        const [year, month] = key.split('-');
+        const label = new Date(year, month - 1).toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+        return { label, value };
+      }).sort((a, b) => {
+        // Ordena por data crescente
+        const [ay, am] = a.label.split('/');
+        const [by, bm] = b.label.split('/');
+        return new Date(a.label) - new Date(b.label);
+      });
+    }
+
+    // Função para buscar dados reais do M2 dos últimos 12 meses
+    async function fetchM2Data() {
+      const today = new Date();
+      const oneYearAgo = new Date(today.getFullYear() - 1, today.getMonth(), today.getDate());
+      const startDate = oneYearAgo.toISOString().split('T')[0];
+      // Usei o corsproxy.io para evitar CORS, mantenha sua chave api_key atualizada
+      const url = `https://corsproxy.io/?https://api.stlouisfed.org/fred/series/observations?series_id=M2SL&observation_start=${startDate}&api_key=a0c9e3828e7d1e4145efcf9ca65dab55&file_type=json`;
+      const response = await fetch(url);
+      const data = await response.json();
+      return data.observations.map(obs => {
+        const date = new Date(obs.date);
+        const label = date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' });
+        return { label, value: parseFloat(obs.value) };
+      });
+    }
+
+    // Calcula o retorno percentual mensal do Bitcoin
+    function calcularRetornosBitcoin(data) {
+      const retornos = [];
+      for (let i = 1; i < data.length; i++) {
+        const retorno = (data[i].value - data[i - 1].value) / data[i - 1].value;
+        retornos.push(retorno);
+      }
+      return retornos;
+    }
+
+    // Calcula o crescimento percentual mensal do M2
+    function calcularCrescimentoM2(data) {
+      const crescimentos = [];
+      for (let i = 1; i < data.length; i++) {
+        const crescimento = (data[i].value - data[i - 1].value) / data[i - 1].value;
+        crescimentos.push(crescimento);
+      }
+      return crescimentos;
+    }
+
+    // --- Estatísticas e modelos (mantém seu código) ---
+    function calcularMedia(arr) {
+      return arr.reduce((a, b) => a + b, 0) / arr.length;
+    }
+
+    function calcularDesvioPadrao(arr, media) {
+      const variancia = arr.reduce((soma, val) => soma + Math.pow(val - media, 2), 0) / arr.length;
+      return Math.sqrt(variancia);
+    }
+
+    function calcularCohenD(grupo1, grupo2) {
+      const m1 = calcularMedia(grupo1);
+      const m2 = calcularMedia(grupo2);
+      const sd1 = calcularDesvioPadrao(grupo1, m1);
+      const sd2 = calcularDesvioPadrao(grupo2, m2);
+      const pooledSD = Math.sqrt((Math.pow(sd1, 2) + Math.pow(sd2, 2)) / 2);
+      return (m1 - m2) / pooledSD;
+    }
+
+    async function createModel() {
+      const model = tf.sequential();
+      model.add(tf.layers.dense({ units: 8, inputShape: [1], activation: 'relu' }));
+      model.add(tf.layers.dense({ units: 1, activation: 'sigmoid' }));
+      model.compile({ optimizer: 'adam', loss: 'binaryCrossentropy', metrics: ['accuracy'] });
+      return model;
+    }
+
+    async function trainEnsemble(X, y, size = 7) {
+      const xs = tf.tensor2d(X);
+      const ys = tf.tensor2d(y, [y.length, 1]);
+      const models = [];
+      for (let i = 0; i < size; i++) {
+        const model = await createModel();
+        await model.fit(xs, ys, { epochs: 50, verbose: 0 });
+        models.push(model);
+      }
+      return models;
+    }
+
+    async function predictEnsemble(models, input) {
+      const inputTensor = tf.tensor2d([input]);
+      const results = await Promise.all(models.map(m => m.predict(inputTensor).data()));
+      const avg = results.reduce((sum, r) => sum + r[0], 0) / models.length;
+      return { avg, previsao: avg > 0.5 ? 'Alta do Bitcoin' : 'Baixa ou estabilidade do Bitcoin', results };
+    }
+
+    function plotLinhaChart(labels, btcData, m2Data) {
+      const ctx = document.getElementById('linhaChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [
+            {
+              label: 'Retorno do Bitcoin',
+              data: btcData,
+              borderColor: 'blue',
+              backgroundColor: 'blue',
+              fill: false,
+              tension: 0.2
+            },
+            {
+              label: 'Crescimento do M2',
+              data: m2Data,
+              borderColor: 'green',
+              backgroundColor: 'green',
+              fill: false,
+              tension: 0.2
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          plugins: { legend: { position: 'top' } },
+          scales: { y: { beginAtZero: false } }
+        }
+      });
+    }
+
+    function plotEnsembleChart(resultados) {
+      const ctx = document.getElementById('ensembleChart').getContext('2d');
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: resultados.map((_, i) => `Modelo ${i + 1}`),
+          datasets: [{
+            label: 'Probabilidade de alta',
+            data: resultados.map(r => r[0]),
+            backgroundColor: 'orange'
+          }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true, max: 1 } }
+        }
+      });
+    }
+
+    function interpretarCohen(d) {
+      const absD = Math.abs(d);
+      if (absD < 0.2) return "muito pequeno";
+      if (absD < 0.5) return "pequeno";
+      if (absD < 0.8) return "médio";
+      return "grande";
+    }
+
+    // Função principal
+    async function executar() {
+      const resultado = document.getElementById('resultado');
+      const cohenDiv = document.getElementById('cohen');
+      resultado.innerText = 'Buscando dados reais e treinando modelos...';
+
+      // Busca os dados reais
+      const btcData = await fetchBitcoinData();
+      const m2Data = await fetchM2Data();
+
+      console.log('btcData:', btcData);
+      console.log('m2Data:', m2Data);
+
+      // Precisamos garantir que as datas estejam alinhadas e com pelo menos 12 meses
+      // Aqui consideramos só os últimos 12 meses para o cálculo dos retornos e crescimento
+      if (btcData.length < 13 || m2Data.length < 11) {
+        resultado.innerText = 'Dados insuficientes para análise.';
+        return;
+      }
+
+      // Calcular retornos do Bitcoin e crescimento do M2 (para os meses alinhados)
+      const btcReturns = calcularRetornosBitcoin(btcData.slice(-13));
+      const m2Growth = calcularCrescimentoM2(m2Data.slice(-13));
+
+      // Criar labels dos últimos 12 meses baseados no bitcoinData (ou m2Data, assumindo que ambos tem os mesmos meses)
+      const meses = btcData.slice(-12).map(d => d.label);
+
+      // Preparar dados para o modelo: X = m2Growth (entrada), y = 1 se retorno bitcoin > 0, 0 caso contrário
+      const tamanho = Math.min(btcReturns.length, m2Growth.length);
+      const X = m2Growth.slice(0, tamanho).map(v => [v]);
+      const y = btcReturns.slice(0, tamanho).map(r => r > 0 ? 1 : 0);
+
+      // Treina ensemble com dados reais
+      const models = await trainEnsemble(X, y, 7);
+
+      // Faz previsão para o último valor conhecido do crescimento do M2
+      const novaEntrada = [m2Growth[m2Growth.length - 1]];
+      const { avg, previsao, results } = await predictEnsemble(models, novaEntrada);
+
+      resultado.innerText = `📈 Previsão para crescimento do M2 (${novaEntrada[0].toFixed(4)}): ${previsao} (confiança média: ${(avg * 100).toFixed(1)}%)`;
+
+      // Calcula o efeito de Cohen entre retorno do Bitcoin e crescimento do M2 (com dados reais)
+      const cohenD = calcularCohenD(btcReturns, m2Growth);
+      const interpretacao = interpretarCohen(cohenD);
+      cohenDiv.innerText = `📏 Efeito de Cohen (Cohen's d): ${cohenD.toFixed(3)} (${interpretacao})`;
+      document.getElementById("interpretacaoCohen").innerText = interpretacao;
+
+
+      // Plota gráficos
+      plotLinhaChart(meses, btcReturns, m2Growth);
+      plotEnsembleChart(results);
+
+      
+    }
+
+    executar();
+  </script>
+</body>
+</html>
